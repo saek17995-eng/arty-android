@@ -17,6 +17,15 @@ on:
         description: '手机上显示的应用名'
         required: false
         default: 'datechat'
+      turn_url:
+        description: 'TURN 中转地址（跨公网通话必填，同一 WiFi 下可留空）'
+        required: false
+      turn_username:
+        description: 'TURN 用户名'
+        required: false
+      turn_credential:
+        description: 'TURN 密码'
+        required: false
   push:
     paths:
       - 'app/**'
@@ -54,7 +63,11 @@ jobs:
 
       - name: 生成 android/ 平台壳
         # 仓库只维护 lib/，平台壳按当前 SDK 模板生成，不写死某个版本的模板文件。
-        run: flutter create --platforms=android --org com.datechat --project-name datechat .
+        run: |
+          flutter create --platforms=android --org com.datechat --project-name datechat .
+          # 模板会顺手塞一个引用 MyApp 的 widget_test.dart（本项目的根组件叫 DateChatApp），
+          # 留着它会让静态分析直接失败，而且它本来就什么都不测。
+          rm -f test/widget_test.dart
 
       - name: 补权限与签名配置
         run: python3 ../scripts/android/prepare_apk.py android
@@ -90,41 +103,26 @@ jobs:
       - name: flutter pub get
         run: flutter pub get
 
-      - name: 兼容腾讯 RTC 插件的旧 compileSdk
-        run: |
-          python3 - <<'PY'
-          import os
-          import re
-          from pathlib import Path
-
-          roots = list(Path(os.environ["PUB_CACHE"]).glob(
-              "hosted/*/tencent_rtc_sdk-*/android/build.gradle*"
-          ))
-          if not roots:
-              raise SystemExit("未找到 tencent_rtc_sdk Android 构建文件")
-          for path in roots:
-              text = path.read_text()
-              patched = re.sub(
-                  r"compileSdkVersion\s*(?:=\s*)?31\b",
-                  "compileSdkVersion 36",
-                  text,
-              )
-              patched = re.sub(r"compileSdk\s*=\s*31\b", "compileSdk = 36", patched)
-              if patched == text:
-                  raise SystemExit(f"{path} 中没有预期的 compileSdk 31")
-              path.write_text(patched)
-              print(f"已修正 {path} -> compileSdk 36")
-          PY
+      # 分析放在打包之前：编译能过不代表没有未定义符号，
+      # 这类问题在真机上表现为一点某个功能就崩，排查成本高得多。
+      - name: 静态分析
+        run: flutter analyze lib test --no-fatal-infos
 
       - name: 打 release APK
         # 同时生成一个无需判断 CPU 型号的通用包，以及体积更小的分架构包。
         run: |
           URL="${{ inputs.api_base_url || 'https://api.datechat.example' }}"
           echo "后端地址：$URL"
-          flutter build apk --release --dart-define=API_BASE_URL="$URL"
-          mv build/app/outputs/flutter-apk/app-release.apk /tmp/datechat-universal.apk
-          flutter build apk --release --split-per-abi --dart-define=API_BASE_URL="$URL"
-          mv /tmp/datechat-universal.apk build/app/outputs/flutter-apk/app-universal-release.apk
+          DEFINES="--dart-define=API_BASE_URL=$URL"
+          if [ -n "${{ inputs.turn_url }}" ]; then
+            echo "TURN：已配置"
+            DEFINES="$DEFINES --dart-define=TURN_URL=${{ inputs.turn_url }}"
+            DEFINES="$DEFINES --dart-define=TURN_USERNAME=${{ inputs.turn_username }}"
+            DEFINES="$DEFINES --dart-define=TURN_CREDENTIAL=${{ inputs.turn_credential }}"
+          else
+            echo "TURN：未配置（同一 WiFi 下可直连，跨公网需要中转）"
+          fi
+          flutter build apk --release --split-per-abi $DEFINES
           ls -lh build/app/outputs/flutter-apk/
 
       - name: 改名带上版本

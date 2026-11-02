@@ -1,264 +1,76 @@
-import 'dart:io';
-
-import 'package:flutter/foundation.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:tencent_rtc_sdk/trtc_cloud.dart';
-import 'package:tencent_rtc_sdk/trtc_cloud_def.dart';
-import 'package:tencent_rtc_sdk/trtc_cloud_listener.dart';
-import 'package:tencent_rtc_sdk/tx_device_manager.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import 'call_models.dart';
+import 'webrtc_bridge.dart';
+
+/// 一次通话中，除进房凭据之外引擎需要的全部上下文。
+///
+/// 单独拎出来而不是塞进构造参数列表：控制器在不同时机才有完整信息
+/// （peerUid 建单时就有，callNo 建单后才有，caller 取决于是谁发起的）。
+class RtcContext {
+  const RtcContext({
+    required this.peerUid,
+    required this.callNo,
+    required this.video,
+    required this.caller,
+    required this.send,
+  });
+
+  final int peerUid;
+  final String callNo;
+  final bool video;
+  final bool caller;
+
+  /// 信令发送口：把 offer / answer / ICE 候选通过 WebSocket 转给对端。
+  final void Function(
+    int to,
+    String callNo,
+    String kind,
+    Map<String, dynamic> payload,
+  ) send;
+}
 
 /// 音视频引擎桥接层。
 ///
-/// 业务层仍只认识服务端签发的 [CallTicket]，腾讯 SDK 的生命周期、权限、
-/// 音频路由和远端画面都封装在这里，避免计费状态机依赖厂商 API。
-abstract class RtcBridge extends ChangeNotifier {
-  RtcBridge();
-
+/// 这一层存在的唯一理由：把"业务（呼叫/计费/心跳）"和"具体音视频引擎"解耦。
+/// 服务端下发的进房凭据只说明"你有权进这个房间"，
+/// 真正拉流由 [WebRtcBridge] 用端对端 PeerConnection 完成——
+/// 不依赖腾讯云 TRTC，因此没有第三方密钥也能真机打通。
+///
+/// 若将来换成 TRTC 原生 SDK，只需再实现一个 RtcBridge 并改 [RtcBridge.create]，
+/// 计费与状态机一行都不用动。
+abstract class RtcBridge {
+  /// 引擎是否真的能出音视频。false 时界面提示"当前无音视频"。
   bool get available;
-  bool get initialized;
-  bool get isVideo;
+
+  /// 给用户的引擎说明（界面顶部小胶囊）。
   String get hint;
   String? get lastError;
   List<String> get remoteVideoUsers;
 
+  /// 本地预览渲染器。语音通话时也可以为 null（未开启视频）。
+  RTCVideoRenderer? get localRenderer => null;
+
+  /// 远端画面渲染器。
+  RTCVideoRenderer? get remoteRenderer => null;
+
+  /// 采集本地媒体并建立连接。幂等：重复调用不会建两条连接。
   Future<void> enterRoom(CallTicket ticket);
+
+  /// 主叫发起协商（对方接听后调用）。
+  Future<void> negotiate();
+
+  /// 处理对端信令。pc 未就绪时会先缓存，就绪后自动补处理。
+  Future<void> handleSignal(String kind, Map<String, dynamic> payload);
+
   Future<void> leaveRoom();
   Future<void> setMicMuted(bool muted);
   Future<void> setSpeakerOn(bool on);
   void startLocalPreview(int viewId);
   void startRemoteView(String userId, int viewId);
 
-  factory RtcBridge.fromTicket(
-    CallTicket ticket, {
-    required bool video,
-  }) {
-    if (ticket.mock) return MockRtcBridge(isVideo: video);
-    return TencentRtcBridge(isVideo: video);
-  }
-}
+  /// 彻底释放（含渲染器）。
+  Future<void> dispose();
 
-class MockRtcBridge extends RtcBridge {
-  MockRtcBridge({required this.isVideo});
-
-  @override
-  final bool isVideo;
-
-  @override
-  bool get available => false;
-
-  @override
-  bool get initialized => false;
-
-  @override
-  String get hint => '服务端仍在模拟模式，请配置 TRTC SDKAppID 与密钥';
-
-  @override
-  String? get lastError => null;
-
-  @override
-  List<String> get remoteVideoUsers => const [];
-
-  @override
-  Future<void> enterRoom(CallTicket ticket) async {}
-
-  @override
-  Future<void> leaveRoom() async {}
-
-  @override
-  Future<void> setMicMuted(bool muted) async {}
-
-  @override
-  Future<void> setSpeakerOn(bool on) async {}
-
-  @override
-  void startLocalPreview(int viewId) {}
-
-  @override
-  void startRemoteView(String userId, int viewId) {}
-}
-
-/// 使用腾讯云 TRTC 原生 SDK 的真实房间实现。
-class TencentRtcBridge extends RtcBridge {
-  TencentRtcBridge({required this.isVideo});
-
-  @override
-  final bool isVideo;
-
-  TRTCCloud? _cloud;
-  TRTCCloudListener? _listener;
-  final List<String> _remoteVideoUsers = [];
-  bool _initialized = false;
-  bool _released = false;
-  String? _lastError;
-  Completer<void>? _enterCompleter;
-
-  @override
-  bool get available => true;
-
-  @override
-  bool get initialized => _initialized;
-
-  @override
-  String get hint {
-    if (_lastError != null) return _lastError!;
-    return _initialized ? '腾讯云音视频已连接' : '正在连接音视频房间…';
-  }
-
-  @override
-  String? get lastError => _lastError;
-
-  @override
-  List<String> get remoteVideoUsers => List.unmodifiable(_remoteVideoUsers);
-
-  @override
-  Future<void> enterRoom(CallTicket ticket) async {
-    if (ticket.sdkAppId <= 0 ||
-        ticket.userId.isEmpty ||
-        ticket.userSig.isEmpty ||
-        ticket.roomId.isEmpty) {
-      throw StateError('服务端下发的 TRTC 进房凭据不完整');
-    }
-
-    if (Platform.isAndroid) {
-      final requested = <Permission>[Permission.microphone];
-      if (isVideo) requested.add(Permission.camera);
-      final statuses = await requested.request();
-      if (statuses.values.any((status) => !status.isGranted)) {
-        throw StateError(
-          isVideo ? '需要麦克风和摄像头权限才能视频通话' : '需要麦克风权限才能语音通话',
-        );
-      }
-      // Android 12+ 蓝牙耳机需要单独授权；拒绝不影响手机听筒/扬声器通话。
-      try {
-        await Permission.bluetoothConnect.request();
-      } catch (_) {
-        // 某些 EMUI/HarmonyOS Android 兼容层没有蓝牙权限设置页；
-        // 蓝牙授权失败不应阻断手机听筒、扬声器的通话。
-      }
-    }
-
-    _enterCompleter = Completer<void>();
-    _cloud = await TRTCCloud.sharedInstance();
-    _listener = TRTCCloudListener(
-      onError: (code, message) {
-        _lastError = '音视频连接失败（$code）：$message';
-        if (!(_enterCompleter?.isCompleted ?? true)) {
-          _enterCompleter!.completeError(StateError(_lastError!));
-        }
-        notifyListeners();
-      },
-      onEnterRoom: (result) {
-        if (result > 0) {
-          _initialized = true;
-          _lastError = null;
-          if (!(_enterCompleter?.isCompleted ?? true)) {
-            _enterCompleter!.complete();
-          }
-        } else {
-          _lastError = '进入音视频房间失败（$result）';
-          if (!(_enterCompleter?.isCompleted ?? true)) {
-            _enterCompleter!.completeError(StateError(_lastError!));
-          }
-        }
-        notifyListeners();
-      },
-      onUserVideoAvailable: (userId, available) {
-        if (available) {
-          if (!_remoteVideoUsers.contains(userId)) {
-            _remoteVideoUsers.add(userId);
-          }
-        } else {
-          _remoteVideoUsers.remove(userId);
-          _cloud?.stopRemoteView(userId, TRTCVideoStreamType.big);
-        }
-        notifyListeners();
-      },
-      onRemoteUserLeaveRoom: (userId, _) {
-        _remoteVideoUsers.remove(userId);
-        notifyListeners();
-      },
-      onExitRoom: (_) => _release(),
-    );
-    _cloud!.registerListener(_listener!);
-    // sharedInstance 已完成，视频渲染控件现在可以安全创建。
-    notifyListeners();
-
-    _cloud!.enterRoom(
-      TRTCParams(
-        sdkAppId: ticket.sdkAppId,
-        userId: ticket.userId,
-        userSig: ticket.userSig,
-        strRoomId: ticket.roomId,
-      ),
-      isVideo ? TRTCAppScene.videoCall : TRTCAppScene.audioCall,
-    );
-    _cloud!.startLocalAudio(TRTCAudioQuality.speech);
-    _cloud!.getDeviceManager().setAudioRoute(
-          isVideo ? TXAudioRoute.speakerPhone : TXAudioRoute.earpiece,
-        );
-    await _enterCompleter!.future.timeout(
-      const Duration(seconds: 15),
-      onTimeout: () => throw StateError('连接音视频房间超时，请检查网络后重试'),
-    );
-  }
-
-  @override
-  Future<void> leaveRoom() async {
-    if (_released) return;
-    _cloud?.stopLocalPreview();
-    _cloud?.stopLocalAudio();
-    _cloud?.stopAllRemoteView();
-    _cloud?.exitRoom();
-    // 正常情况下 onExitRoom 会释放；引擎尚未进房时在这里兜底。
-    if (!_initialized) _release();
-  }
-
-  @override
-  Future<void> setMicMuted(bool muted) async {
-    _cloud?.muteLocalAudio(muted);
-  }
-
-  @override
-  Future<void> setSpeakerOn(bool on) async {
-    _cloud?.getDeviceManager().setAudioRoute(
-          on ? TXAudioRoute.speakerPhone : TXAudioRoute.earpiece,
-        );
-  }
-
-  @override
-  void startLocalPreview(int viewId) {
-    if (!isVideo) return;
-    _cloud?.startLocalPreview(true, viewId);
-  }
-
-  @override
-  void startRemoteView(String userId, int viewId) {
-    _cloud?.startRemoteView(userId, TRTCVideoStreamType.big, viewId);
-  }
-
-  void _release() {
-    if (_released) return;
-    _released = true;
-    final listener = _listener;
-    if (listener != null) _cloud?.unRegisterListener(listener);
-    _remoteVideoUsers.clear();
-    _initialized = false;
-    _cloud = null;
-    _enterCompleter = null;
-    TRTCCloud.destroySharedInstance();
-    notifyListeners();
-  }
-
-  @override
-  void dispose() {
-    if (!_released) {
-      _cloud?.stopLocalPreview();
-      _cloud?.stopLocalAudio();
-      _cloud?.exitRoom();
-      _release();
-    }
-    super.dispose();
-  }
+  factory RtcBridge.create(RtcContext ctx) => WebRtcBridge(ctx: ctx);
 }

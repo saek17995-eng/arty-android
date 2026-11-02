@@ -34,10 +34,14 @@ PERMISSIONS = [
     "android.permission.RECORD_AUDIO",
     "android.permission.MODIFY_AUDIO_SETTINGS",
     "android.permission.VIBRATE",
+    # Android 13（API 33）起通知是运行时权限：manifest 里不声明，
+    # 系统压根不会弹授权框，新消息推送就永远静音。
     "android.permission.POST_NOTIFICATIONS",
-    "android.permission.BLUETOOTH",
-    "android.permission.BLUETOOTH_CONNECT",
+    # 锁屏弹来电界面（fullScreenIntent）在 Android 14 上需要它，
+    # 否则来电只会有一条普通通知，用户很容易漏接。
     "android.permission.USE_FULL_SCREEN_INTENT",
+    # 通话中要防止系统休眠掐断音频：flutter_webrtc 的前台服务也依赖它。
+    "android.permission.FOREGROUND_SERVICE",
     "android.permission.WAKE_LOCK",
 ]
 
@@ -218,56 +222,92 @@ def patch_signing(android_dir: Path) -> bool:
     return False
 
 
-def patch_gradle(android_dir: Path) -> bool:
-    """为通知插件补 Java 17 desugaring；同时兼容 Kotlin/Groovy 模板。"""
-    kts = android_dir / "app" / "build.gradle.kts"
-    groovy = android_dir / "app" / "build.gradle"
-    path = kts if kts.exists() else groovy
-    if not path.exists():
-        print("  ! 没找到 app Gradle 文件，跳过 desugaring")
-        return False
-    text = path.read_text(encoding="utf-8")
-    is_kts = path.suffix == ".kts"
+def patch_min_sdk(android_dir: Path) -> bool:
+    """把 minSdk 抬到 24。
 
-    flag = (
-        "isCoreLibraryDesugaringEnabled = true"
-        if is_kts
-        else "coreLibraryDesugaringEnabled true"
-    )
-    if flag not in text:
-        marker = re.search(r"compileOptions\s*\{", text)
-        if marker:
-            text = text[: marker.end()] + "\n        " + flag + text[marker.end() :]
+    flutter_webrtc 与全屏来电通知都需要 API 24+ 的部分能力，
+    而模板在个别版本里仍是 21；留着 21 会在安装后运行时崩，
+    且报错信息完全看不出是 minSdk 的锅。
+    """
+    for name in ("build.gradle.kts", "build.gradle"):
+        path = android_dir / "app" / name
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+
+        def bump(match: "re.Match[str]") -> str:
+            value = int(match.group(2))
+            return match.group(1) + str(max(24, value))
+
+        new = re.sub(r"(minSdk\s*=\s*)(\d+)", bump, text)
+        new = re.sub(r"(minSdkVersion\s+)(\d+)", bump, new)
+        if new != text:
+            path.write_text(new, encoding="utf-8")
+            print("  已将 minSdk 抬到 24（WebRTC 与全屏来电需要）")
         else:
-            android = re.search(r"android\s*\{", text)
-            if not android:
-                print("  ! 没找到 android {}，跳过 desugaring")
+            print("  minSdk 已满足要求")
+        return True
+    print("  ! 没找到构建脚本，跳过 minSdk 补丁")
+    return False
+
+
+DESUGAR_KTS = '    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
+DESUGAR_GROOVY = "    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'"
+
+
+def patch_desugaring(android_dir: Path) -> bool:
+    """开启 core library desugaring。
+
+    flutter_local_notifications 用到了 java.time，在低版本 Android 上靠脱糖支持。
+    不开的话 Gradle 在 checkReleaseAarMetadata 阶段直接失败，而且报错只说
+    "requires core library desugaring"，不看这段根本不知道该改哪儿。
+    """
+    for name, flag, dep in (
+        ("build.gradle.kts", "        isCoreLibraryDesugaringEnabled = true", DESUGAR_KTS),
+        ("build.gradle", "        coreLibraryDesugaringEnabled true", DESUGAR_GROOVY),
+    ):
+        path = android_dir / "app" / name
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "isCoreLibraryDesugaringEnabled" in text or "coreLibraryDesugaringEnabled" in text:
+            print("  已开启 core library desugaring")
+            return True
+
+        block = "compileOptions {"
+        idx = text.find(block)
+        if idx >= 0:
+            at = idx + len(block)
+            text = text[:at] + "\n" + flag + text[at:]
+        else:
+            m = re.search(r"^android\s*\{", text, re.M)
+            if not m:
+                print("  ! 没找到 android {} 块，跳过 desugaring 补丁")
                 return False
-            block = f"\n    compileOptions {{\n        {flag}\n    }}\n"
-            text = text[: android.end()] + block + text[android.end() :]
+            text = (
+                text[: m.end()]
+                + "\n    compileOptions {\n"
+                + flag
+                + "\n    }"
+                + text[m.end() :]
+            )
 
-    dependency = (
-        'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
-        if is_kts
-        else "coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'"
-    )
-    if "desugar_jdk_libs" not in text:
-        deps = re.search(r"dependencies\s*\{", text)
-        if deps:
-            text = text[: deps.end()] + "\n    " + dependency + text[deps.end() :]
-        else:
-            text += f"\n\ndependencies {{\n    {dependency}\n}}\n"
-
-    path.write_text(text, encoding="utf-8")
-    print(f"  已为 {path.name} 开启 coreLibraryDesugaring")
-    return True
+        # 依赖块单独追加：Gradle 允许多个 dependencies {}，比往已有块里插更安全。
+        if "desugar_jdk_libs" not in text:
+            text = text.rstrip() + "\n\ndependencies {\n" + dep + "\n}\n"
+        path.write_text(text, encoding="utf-8")
+        print("  已开启 core library desugaring（通知插件需要 java.time）")
+        return True
+    print("  ! 没找到构建脚本，跳过 desugaring 补丁")
+    return False
 
 
 def main() -> int:
     android_dir = Path(sys.argv[1] if len(sys.argv) > 1 else "app/android")
     print(f"准备 Android 壳：{android_dir}")
     patch_manifest(android_dir / "app" / "src" / "main" / "AndroidManifest.xml")
-    patch_gradle(android_dir)
+    patch_min_sdk(android_dir)
+    patch_desugaring(android_dir)
     patch_signing(android_dir)
     print("完成")
     return 0
