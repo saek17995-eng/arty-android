@@ -129,8 +129,11 @@ class CallController extends StateNotifier<CallState> {
   final Ref _ref;
   Timer? _uiTimer;
   Timer? _beatTimer;
+  Timer? _sessionTimer;
   RtcBridge? _bridge;
   bool _endingForRtcError = false;
+  bool _checkingSession = false;
+  int _heartbeatIntervalSec = 10;
 
   RtcBridge? get bridge => _bridge;
 
@@ -307,7 +310,8 @@ class CallController extends StateNotifier<CallState> {
     _endingForRtcError = false;
     _bridge = RtcBridge.fromTicket(result.ticket, video: session.isVideo);
     _bridge!.addListener(_handleRtcState);
-    unawaited(_enterRtc(result.ticket, session.isTalking));
+    unawaited(_enterRtc(result.ticket));
+    _heartbeatIntervalSec = result.heartbeatIntervalSec;
 
     state = state.copyWith(
       phase: session.isTalking ? CallPhase.talking : CallPhase.ringing,
@@ -322,18 +326,23 @@ class CallController extends StateNotifier<CallState> {
     _startUiTimer();
     if (session.isTalking) {
       _startBeatTimer(result.heartbeatIntervalSec);
+    } else if (state.isCaller) {
+      // 发起接口返回的是“振铃中”。必须继续观察服务端状态，否则被叫接听后
+      // 主叫仍会永远停在振铃页，心跳也不会启动。
+      _startSessionTimer();
     }
   }
 
-  Future<void> _enterRtc(CallTicket ticket, bool alreadyTalking) async {
+  Future<void> _enterRtc(CallTicket ticket) async {
     try {
       await _bridge?.enterRoom(ticket);
     } catch (error) {
       state = state.copyWith(
         error: error.toString().replaceFirst('Bad state: ', ''),
       );
-      // 接听后已经开始计费，进房失败必须主动挂断，不能让用户无声被扣费。
-      if (alreadyTalking) await _endForRtcError();
+      // 进房失败时终止本次呼叫。已经接听的会立即停止计费，尚在振铃的
+      // 主叫会取消呼叫，避免对方接起后才发现这一端没有声音/画面。
+      await _endForRtcError();
     }
   }
 
@@ -341,8 +350,11 @@ class CallController extends StateNotifier<CallState> {
     final error = _bridge?.lastError;
     if (error == null || error.isEmpty) return;
     state = state.copyWith(error: error);
-    // TRTC 的 onError 表示不可恢复错误；已接通时立即停止计费链路。
-    if (state.phase == CallPhase.talking) unawaited(_endForRtcError());
+    // TRTC 的 onError 表示不可恢复错误；振铃或已接通都应终止本次呼叫。
+    if (state.phase == CallPhase.ringing ||
+        state.phase == CallPhase.talking) {
+      unawaited(_endForRtcError());
+    }
   }
 
   Future<void> _endForRtcError() async {
@@ -365,6 +377,61 @@ class CallController extends StateNotifier<CallState> {
       Duration(seconds: intervalSec <= 0 ? 10 : intervalSec),
       (_) => unawaited(_beat()),
     );
+  }
+
+  void _startSessionTimer() {
+    _sessionTimer?.cancel();
+    unawaited(_syncSession());
+    _sessionTimer = Timer.periodic(
+      const Duration(seconds: 2),
+      (_) => unawaited(_syncSession()),
+    );
+  }
+
+  Future<void> _syncSession() async {
+    final callNo = state.callNo;
+    if (_checkingSession ||
+        callNo.isEmpty ||
+        state.phase != CallPhase.ringing ||
+        !state.isCaller) {
+      return;
+    }
+    _checkingSession = true;
+    try {
+      final session = await _ref.read(callApiProvider).detail(callNo);
+      if (state.callNo != callNo || state.phase != CallPhase.ringing) return;
+      if (session.isTalking) {
+        _sessionTimer?.cancel();
+        _sessionTimer = null;
+        state = state.copyWith(
+          phase: CallPhase.talking,
+          session: session,
+          chargedMinutes: session.chargedMinutes,
+          totalCoins: session.totalCoins,
+          clearError: _bridge?.lastError == null,
+        );
+        _startBeatTimer(_heartbeatIntervalSec);
+        if (_bridge?.lastError != null) await _endForRtcError();
+      } else if (session.isFinished) {
+        _stopTimers();
+        await _bridge?.leaveRoom();
+        state = state.copyWith(
+          phase: CallPhase.ended,
+          session: session,
+          endReason: session.endReason,
+          chargedMinutes: session.chargedMinutes,
+          totalCoins: session.totalCoins,
+        );
+        _refreshWalletAndRecords();
+      }
+    } on ApiException catch (error) {
+      // 弱网时保留振铃状态，下次轮询会继续同步。
+      state = state.copyWith(error: error.message);
+    } catch (_) {
+      // 网络抖动不应自动取消正在建立的呼叫。
+    } finally {
+      _checkingSession = false;
+    }
   }
 
   Future<void> _beat() async {
@@ -407,6 +474,8 @@ class CallController extends StateNotifier<CallState> {
     _uiTimer = null;
     _beatTimer?.cancel();
     _beatTimer = null;
+    _sessionTimer?.cancel();
+    _sessionTimer = null;
   }
 
   void _refreshWalletAndRecords() {

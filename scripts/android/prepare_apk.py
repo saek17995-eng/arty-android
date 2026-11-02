@@ -38,6 +38,7 @@ PERMISSIONS = [
     "android.permission.BLUETOOTH",
     "android.permission.BLUETOOTH_CONNECT",
     "android.permission.USE_FULL_SCREEN_INTENT",
+    "android.permission.WAKE_LOCK",
 ]
 
 

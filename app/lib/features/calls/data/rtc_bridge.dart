@@ -92,6 +92,7 @@ class TencentRtcBridge extends RtcBridge {
   bool _initialized = false;
   bool _released = false;
   String? _lastError;
+  Completer<void>? _enterCompleter;
 
   @override
   bool get available => true;
@@ -130,21 +131,36 @@ class TencentRtcBridge extends RtcBridge {
         );
       }
       // Android 12+ 蓝牙耳机需要单独授权；拒绝不影响手机听筒/扬声器通话。
-      await Permission.bluetoothConnect.request();
+      try {
+        await Permission.bluetoothConnect.request();
+      } catch (_) {
+        // 某些 EMUI/HarmonyOS Android 兼容层没有蓝牙权限设置页；
+        // 蓝牙授权失败不应阻断手机听筒、扬声器的通话。
+      }
     }
 
+    _enterCompleter = Completer<void>();
     _cloud = await TRTCCloud.sharedInstance();
     _listener = TRTCCloudListener(
       onError: (code, message) {
         _lastError = '音视频连接失败（$code）：$message';
+        if (!(_enterCompleter?.isCompleted ?? true)) {
+          _enterCompleter!.completeError(StateError(_lastError!));
+        }
         notifyListeners();
       },
       onEnterRoom: (result) {
         if (result > 0) {
           _initialized = true;
           _lastError = null;
+          if (!(_enterCompleter?.isCompleted ?? true)) {
+            _enterCompleter!.complete();
+          }
         } else {
           _lastError = '进入音视频房间失败（$result）';
+          if (!(_enterCompleter?.isCompleted ?? true)) {
+            _enterCompleter!.completeError(StateError(_lastError!));
+          }
         }
         notifyListeners();
       },
@@ -178,10 +194,14 @@ class TencentRtcBridge extends RtcBridge {
       ),
       isVideo ? TRTCAppScene.videoCall : TRTCAppScene.audioCall,
     );
-    _cloud!.startLocalAudio(TRTCAudioQuality.defaultMode);
+    _cloud!.startLocalAudio(TRTCAudioQuality.speech);
     _cloud!.getDeviceManager().setAudioRoute(
           isVideo ? TXAudioRoute.speakerPhone : TXAudioRoute.earpiece,
         );
+    await _enterCompleter!.future.timeout(
+      const Duration(seconds: 15),
+      onTimeout: () => throw StateError('连接音视频房间超时，请检查网络后重试'),
+    );
   }
 
   @override
@@ -226,6 +246,7 @@ class TencentRtcBridge extends RtcBridge {
     _remoteVideoUsers.clear();
     _initialized = false;
     _cloud = null;
+    _enterCompleter = null;
     TRTCCloud.destroySharedInstance();
     notifyListeners();
   }

@@ -48,7 +48,7 @@ class CommunicationService {
   Timer? _callTimer;
   int _callUserId = 0;
   bool _notificationReady = false;
-  bool _notificationAttempted = false;
+  bool _initializingNotifications = false;
   bool _polling = false;
   bool _nativeImReady = false;
   String _activeUserId = '';
@@ -78,24 +78,50 @@ class CommunicationService {
   }
 
   Future<void> _ensureNotifications() async {
-    if (_notificationReady || _notificationAttempted) return;
-    _notificationAttempted = true;
+    if (_notificationReady || _initializingNotifications) return;
+    _initializingNotifications = true;
     try {
       const settings = InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
       );
       await _notifications.initialize(settings: settings);
       if (Platform.isAndroid) {
-        await _notifications
-            .resolvePlatformSpecificImplementation<
-                AndroidFlutterLocalNotificationsPlugin>()
-            ?.requestNotificationsPermission();
+        final android = _notifications.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+        await android?.createNotificationChannel(
+          const AndroidNotificationChannel(
+            'datechat_messages',
+            '聊天消息',
+            description: '新聊天消息提醒',
+            importance: Importance.max,
+            playSound: true,
+            enableVibration: true,
+          ),
+        );
+        await android?.createNotificationChannel(
+          const AndroidNotificationChannel(
+            'datechat_calls',
+            '语音和视频来电',
+            description: '新的语音或视频通话邀请',
+            importance: Importance.max,
+            playSound: true,
+            enableVibration: true,
+            audioAttributesUsage: AudioAttributesUsage.notificationRingtone,
+          ),
+        );
+        final enabled = await android?.areNotificationsEnabled();
+        if (enabled != true) {
+          await android?.requestNotificationsPermission();
+        }
       }
       _notificationReady = true;
     } catch (_) {
       // 通知能力不可用不应阻止登录与主界面启动。尤其不要在冷启动时调用
       // requestFullScreenIntentPermission：少数厂商 ROM 没有对应设置页，
       // 原生 ActivityNotFoundException 会直接导致闪退。
+    } finally {
+      // 初始化失败后允许下一条消息再次尝试，不能永久关闭通知能力。
+      _initializingNotifications = false;
     }
   }
 
