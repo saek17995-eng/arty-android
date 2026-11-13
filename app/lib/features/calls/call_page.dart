@@ -8,7 +8,6 @@ import 'package:go_router/go_router.dart';
 import '../profile/profile_image.dart';
 import 'call_controller.dart';
 import 'data/rtc_bridge.dart';
-import 'rtc_video_panel.dart';
 
 /// 通话页（语音/视频共用）。
 ///

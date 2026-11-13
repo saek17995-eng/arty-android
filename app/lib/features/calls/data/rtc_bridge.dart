@@ -45,8 +45,6 @@ abstract class RtcBridge {
 
   /// 给用户的引擎说明（界面顶部小胶囊）。
   String get hint;
-  String? get lastError;
-  List<String> get remoteVideoUsers;
 
   /// 本地预览渲染器。语音通话时也可以为 null（未开启视频）。
   RTCVideoRenderer? get localRenderer => null;
@@ -66,8 +64,6 @@ abstract class RtcBridge {
   Future<void> leaveRoom();
   Future<void> setMicMuted(bool muted);
   Future<void> setSpeakerOn(bool on);
-  void startLocalPreview(int viewId);
-  void startRemoteView(String userId, int viewId);
 
   /// 彻底释放（含渲染器）。
   Future<void> dispose();
