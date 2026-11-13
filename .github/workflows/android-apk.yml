@@ -12,7 +12,7 @@ on:
       api_base_url:
         description: '客户端后端地址（写入 --dart-define=API_BASE_URL）'
         required: false
-        default: 'https://api.datechat.example'
+        default: 'https://hs2.rqez.cn'
       app_name:
         description: '手机上显示的应用名'
         required: false
@@ -109,9 +109,9 @@ jobs:
         run: flutter analyze lib test --no-fatal-infos
 
       - name: 打 release APK
-        # 同时生成一个无需判断 CPU 型号的通用包，以及体积更小的分架构包。
+        # Pura 70 使用 arm64；只打目标架构可以减小包体并避免混入 x86 so。
         run: |
-          URL="${{ inputs.api_base_url || 'https://api.datechat.example' }}"
+          URL="${{ inputs.api_base_url || 'https://hs2.rqez.cn' }}"
           echo "后端地址：$URL"
           DEFINES="--dart-define=API_BASE_URL=$URL"
           if [ -n "${{ inputs.turn_url }}" ]; then
@@ -122,17 +122,14 @@ jobs:
           else
             echo "TURN：未配置（同一 WiFi 下可直连，跨公网需要中转）"
           fi
-          flutter build apk --release --split-per-abi $DEFINES
+          flutter build apk --release --target-platform android-arm64 $DEFINES
           ls -lh build/app/outputs/flutter-apk/
 
       - name: 改名带上版本
         run: |
           OUT=build/app/outputs/flutter-apk
           SHA="${{ steps.ver.outputs.sha }}"
-          mv "$OUT/app-universal-release.apk"   "$OUT/datechat-v0.1.0-$SHA-universal.apk"
-          mv "$OUT/app-arm64-v8a-release.apk"     "$OUT/datechat-v0.1.0-$SHA-arm64-v8a.apk"
-          mv "$OUT/app-armeabi-v7a-release.apk"   "$OUT/datechat-v0.1.0-$SHA-armeabi-v7a.apk"
-          mv "$OUT/app-x86_64-release.apk"        "$OUT/datechat-v0.1.0-$SHA-x86_64.apk"
+          mv "$OUT/app-release.apk" "$OUT/datechat-v0.1.0-$SHA-huawei-pura70-arm64-v8a.apk"
           ls -lh "$OUT"
 
       - name: 上传 arm64（绝大多数手机）
@@ -140,20 +137,6 @@ jobs:
         with:
           name: datechat-arm64-${{ steps.ver.outputs.sha }}
           path: app/build/app/outputs/flutter-apk/*-arm64-v8a.apk
-          retention-days: 30
-
-      - name: 上传通用 APK（无需判断手机型号）
-        uses: actions/upload-artifact@v4
-        with:
-          name: datechat-universal-${{ steps.ver.outputs.sha }}
-          path: app/build/app/outputs/flutter-apk/*-universal.apk
-          retention-days: 30
-
-      - name: 上传 armeabi-v7a（老设备）
-        uses: actions/upload-artifact@v4
-        with:
-          name: datechat-armeabi-v7a-${{ steps.ver.outputs.sha }}
-          path: app/build/app/outputs/flutter-apk/*-armeabi-v7a.apk
           retention-days: 30
 
       # 打 tag（git tag v0.1.0 && git push --tags）时，把全部 APK 一起挂到 Release。
@@ -165,7 +148,7 @@ jobs:
           body: |
             Flutter ${{ steps.ver.outputs.flutter }} · 提交 `${{ steps.ver.outputs.sha }}`
             包名 `com.datechat.datechat`，自签名（demo 分发用）。
-            不确定手机架构时下载 universal；arm64 适用于绝大多数在用的 Android 手机。
+            本产物为 arm64-v8a，适用于 HUAWEI Pura 70 等 64 位 ARM 安卓设备。
           draft: false
 
       - name: 汇总
@@ -175,12 +158,12 @@ jobs:
           echo "- Flutter：${{ steps.ver.outputs.flutter }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- 提交：\`${{ steps.ver.outputs.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- 包名：\`com.datechat.datechat\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- 后端：\`${{ inputs.api_base_url || 'https://api.datechat.example' }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 后端：\`${{ inputs.api_base_url || 'https://hs2.rqez.cn' }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| ABI | 体积 | 适用 |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
           for f in build/app/outputs/flutter-apk/datechat-*.apk; do
             n=$(basename "$f" .apk)
             abi=$(echo "$n" | awk -F'-' '{print $NF}')
-            echo "| $abi | $(du -h "$f" | cut -f1) | $(case $abi in universal) echo 全部支持的安卓手机 ;; arm64-v8a) echo 绝大多数手机 ;; armeabi-v7a) echo 老设备 ;; *) echo 模拟器/x86 ;; esac) |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| $abi | $(du -h "$f" | cut -f1) | HUAWEI Pura 70 / arm64 安卓设备 |" >> "$GITHUB_STEP_SUMMARY"
           done

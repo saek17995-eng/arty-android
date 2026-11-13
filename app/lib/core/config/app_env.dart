@@ -40,7 +40,7 @@ class AppEnv {
     flavor: AppFlavor.prod,
     apiBaseUrl: String.fromEnvironment(
       'API_BASE_URL',
-      defaultValue: 'https://api.datechat.example',
+      defaultValue: 'https://hs2.rqez.cn',
     ),
     imSdkAppId: 0,
     trtcSdkAppId: 0,

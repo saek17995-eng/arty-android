@@ -61,7 +61,12 @@ class DateChatApp extends ConsumerWidget {
     ref.listen(incomingCallProvider, (previous, next) {
       if (next == null || previous?.callNo == next.callNo) return;
       // 先把会话交给通话控制器，路由打开后页面只负责展示接听/拒接操作。
-      ref.read(callControllerProvider.notifier).prepareIncoming(next);
+      ref.read(callControllerProvider.notifier).prepareIncoming(
+            callNo: next.callNo,
+            callerId: next.callerId,
+            video: next.isVideo,
+            pricePerMin: next.pricePerMin,
+          );
       WidgetsBinding.instance.addPostFrameCallback((_) {
         router.push(
           '/call',

@@ -149,13 +149,51 @@ class CallController extends StateNotifier<CallState> {
   final Ref _ref;
   Timer? _uiTimer;
   Timer? _beatTimer;
-  Timer? _sessionTimer;
   RtcBridge? _bridge;
   RtcContext? _ctx;
   StreamSubscription<RealtimeEvent>? _eventSub;
   int _beatIntervalSec = 10;
 
   // ------------------------------------------------------------ 主叫 / 被叫
+
+  /// 被叫收到邀请后只进入“振铃”状态，绝不能在打开页面时自动接听或反向拨号。
+  /// 真正的接听只由用户点击接听按钮触发 [accept]。
+  void prepareIncoming({
+    required String callNo,
+    required int callerId,
+    required bool video,
+    int pricePerMin = 0,
+    String peerName = '',
+    String peerAvatar = '',
+  }) {
+    if (callNo.isEmpty || callerId <= 0) return;
+    if (state.callNo == callNo && state.phase == CallPhase.ringing) return;
+
+    final old = _bridge;
+    _bridge = null;
+    _ctx = null;
+    unawaited(old?.dispose().catchError((Object _) {}));
+
+    state = CallState(
+      phase: CallPhase.ringing,
+      session: CallSession(
+        id: 0,
+        callNo: callNo,
+        callerId: callerId,
+        calleeId: 0,
+        mediaType: video ? mediaVideo : mediaAudio,
+        pricePerMin: pricePerMin,
+        status: callStatusRinging,
+        roomId: '',
+      ),
+      peerName: peerName,
+      peerAvatar: peerAvatar,
+      isCaller: false,
+      isVideo: video,
+      pricePerMin: pricePerMin,
+      engineState: '等待接听…',
+    );
+  }
 
   /// 主叫：发起通话。
   Future<bool> start({
@@ -315,7 +353,7 @@ class CallController extends StateNotifier<CallState> {
   void _onRemoteUpdate(Map<String, dynamic> data) {
     final callNo = (data['call_no'] ?? '').toString();
     if (state.callNo.isEmpty || callNo.isEmpty || callNo != state.callNo) return;
-    switch ((data['statusText'] ?? '').toString()) {
+    switch ((data['statusText'] ?? data['status_text'] ?? '').toString()) {
       case 'talking':
         if (state.phase == CallPhase.talking) return;
         state = state.copyWith(phase: CallPhase.talking);
@@ -432,61 +470,6 @@ class CallController extends StateNotifier<CallState> {
     );
   }
 
-  void _startSessionTimer() {
-    _sessionTimer?.cancel();
-    unawaited(_syncSession());
-    _sessionTimer = Timer.periodic(
-      const Duration(seconds: 2),
-      (_) => unawaited(_syncSession()),
-    );
-  }
-
-  Future<void> _syncSession() async {
-    final callNo = state.callNo;
-    if (_checkingSession ||
-        callNo.isEmpty ||
-        state.phase != CallPhase.ringing ||
-        !state.isCaller) {
-      return;
-    }
-    _checkingSession = true;
-    try {
-      final session = await _ref.read(callApiProvider).detail(callNo);
-      if (state.callNo != callNo || state.phase != CallPhase.ringing) return;
-      if (session.isTalking) {
-        _sessionTimer?.cancel();
-        _sessionTimer = null;
-        state = state.copyWith(
-          phase: CallPhase.talking,
-          session: session,
-          chargedMinutes: session.chargedMinutes,
-          totalCoins: session.totalCoins,
-          clearError: _bridge?.lastError == null,
-        );
-        _startBeatTimer(_heartbeatIntervalSec);
-        if (_bridge?.lastError != null) await _endForRtcError();
-      } else if (session.isFinished) {
-        _stopTimers();
-        await _bridge?.leaveRoom();
-        state = state.copyWith(
-          phase: CallPhase.ended,
-          session: session,
-          endReason: session.endReason,
-          chargedMinutes: session.chargedMinutes,
-          totalCoins: session.totalCoins,
-        );
-        _refreshWalletAndRecords();
-      }
-    } on ApiException catch (error) {
-      // 弱网时保留振铃状态，下次轮询会继续同步。
-      state = state.copyWith(error: error.message);
-    } catch (_) {
-      // 网络抖动不应自动取消正在建立的呼叫。
-    } finally {
-      _checkingSession = false;
-    }
-  }
-
   Future<void> _beat() async {
     final callNo = state.callNo;
     if (callNo.isEmpty || state.phase == CallPhase.ended) return;
@@ -517,8 +500,6 @@ class CallController extends StateNotifier<CallState> {
     _uiTimer = null;
     _beatTimer?.cancel();
     _beatTimer = null;
-    _sessionTimer?.cancel();
-    _sessionTimer = null;
   }
 
   void _refreshWalletAndRecords() {

@@ -56,14 +56,13 @@ class _CallPageState extends ConsumerState<CallPage> {
       if (_started) return;
       _started = true;
       if (widget.incoming && !widget.autoAccept) {
-        final current = ref.read(callControllerProvider).session;
-        if (current != null && current.callNo == widget.callNo) {
-          ref.read(callControllerProvider.notifier).prepareIncoming(
-                current,
-                peerName: widget.peerName,
-                peerAvatar: widget.peerAvatar,
-              );
-        }
+        ref.read(callControllerProvider.notifier).prepareIncoming(
+              callNo: widget.callNo,
+              callerId: widget.peerUid,
+              video: widget.isVideo,
+              peerName: widget.peerName,
+              peerAvatar: widget.peerAvatar,
+            );
       } else if (widget.autoAccept) {
         unawaited(_accept());
       } else {
