@@ -146,8 +146,15 @@ jobs:
           printf '%s\n' "$RELAY_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H 43.139.251.20 >> ~/.ssh/known_hosts
-          scp build/app/outputs/flutter-apk/*-huawei-pura70-arm64-v8a.apk \
-            root@43.139.251.20:/tmp/datechat-huawei-pura70-arm64-v8a.apk
+          APK="$(find build/app/outputs/flutter-apk -name '*-huawei-pura70-arm64-v8a.apk' -print -quit)"
+          ssh root@43.139.251.20 'rm -f /tmp/datechat-huawei-pura70-arm64-v8a.apk /tmp/datechat.part.*'
+          split -b 4m "$APK" "$RUNNER_TEMP/datechat.part."
+          for part in "$RUNNER_TEMP"/datechat.part.*; do
+            scp "$part" "root@43.139.251.20:/tmp/$(basename "$part")" &
+          done
+          wait
+          ssh root@43.139.251.20 \
+            'cat $(ls -1 /tmp/datechat.part.* | sort) > /tmp/datechat-huawei-pura70-arm64-v8a.apk && rm -f /tmp/datechat.part.*'
 
       - name: 上传 arm64（绝大多数手机）
         uses: actions/upload-artifact@v4
