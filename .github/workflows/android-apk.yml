@@ -79,14 +79,14 @@ jobs:
           keytool -genkeypair -v \
             -keystore keys/arty-release.jks \
             -keyalg RSA -keysize 2048 -validity 10950 -alias arty \
-            -storepass arty -keypass arty \
+            -storepass arty2026 -keypass arty2026 \
             -dname "CN=Arty, OU=Mobile, O=Arty, L=Beijing, ST=Beijing, C=CN" \
             > /dev/null
           cat > key.properties <<'EOF'
           storeFile=../keys/arty-release.jks
-          storePassword=arty
+          storePassword=arty2026
           keyAlias=arty
-          keyPassword=arty
+          keyPassword=arty2026
           EOF
           echo "密钥已生成（仅存在于本次构建环境，不进仓库）"
 
