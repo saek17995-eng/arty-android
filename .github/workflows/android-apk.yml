@@ -16,7 +16,7 @@ on:
       app_name:
         description: '手机上显示的应用名'
         required: false
-        default: 'datechat'
+        default: 'Arty'
       turn_url:
         description: 'TURN 中转地址（跨公网通话必填，同一 WiFi 下可留空）'
         required: false
@@ -64,8 +64,8 @@ jobs:
       - name: 生成 android/ 平台壳
         # 仓库只维护 lib/，平台壳按当前 SDK 模板生成，不写死某个版本的模板文件。
         run: |
-          flutter create --platforms=android --org com.datechat --project-name datechat .
-          # 模板会顺手塞一个引用 MyApp 的 widget_test.dart（本项目的根组件叫 DateChatApp），
+          flutter create --platforms=android --org com.arty --project-name arty .
+          # 模板会顺手塞一个引用 MyApp 的 widget_test.dart（本项目的根组件叫 ArtyApp），
           # 留着它会让静态分析直接失败，而且它本来就什么都不测。
           rm -f test/widget_test.dart
 
@@ -77,16 +77,16 @@ jobs:
         run: |
           mkdir -p keys
           keytool -genkeypair -v \
-            -keystore keys/datechat-release.jks \
-            -keyalg RSA -keysize 2048 -validity 10950 -alias datechat \
-            -storepass datechat -keypass datechat \
-            -dname "CN=datechat, OU=Mobile, O=datechat, L=Beijing, ST=Beijing, C=CN" \
+            -keystore keys/arty-release.jks \
+            -keyalg RSA -keysize 2048 -validity 10950 -alias arty \
+            -storepass arty -keypass arty \
+            -dname "CN=Arty, OU=Mobile, O=Arty, L=Beijing, ST=Beijing, C=CN" \
             > /dev/null
           cat > key.properties <<'EOF'
-          storeFile=../keys/datechat-release.jks
-          storePassword=datechat
-          keyAlias=datechat
-          keyPassword=datechat
+          storeFile=../keys/arty-release.jks
+          storePassword=arty
+          keyAlias=arty
+          keyPassword=arty
           EOF
           echo "密钥已生成（仅存在于本次构建环境，不进仓库）"
 
@@ -95,7 +95,7 @@ jobs:
 
       - name: 应用名
         run: |
-          NAME="${{ inputs.app_name || 'datechat' }}"
+          NAME="${{ inputs.app_name || 'Arty' }}"
           sed -i.bak "s|android:label=\"[^\"]*\"|android:label=\"$NAME\"|" \
             android/app/src/main/AndroidManifest.xml
           grep -o 'android:label="[^"]*"' android/app/src/main/AndroidManifest.xml
@@ -129,13 +129,13 @@ jobs:
         run: |
           OUT=build/app/outputs/flutter-apk
           SHA="${{ steps.ver.outputs.sha }}"
-          mv "$OUT/app-release.apk" "$OUT/datechat-v0.1.0-$SHA-huawei-pura70-arm64-v8a.apk"
+          mv "$OUT/app-release.apk" "$OUT/arty-v0.1.0-$SHA-huawei-pura70-arm64-v8a.apk"
           ls -lh "$OUT"
 
       - name: 上传 arm64（绝大多数手机）
         uses: actions/upload-artifact@v4
         with:
-          name: datechat-arm64-${{ steps.ver.outputs.sha }}
+          name: arty-arm64-${{ steps.ver.outputs.sha }}
           path: app/build/app/outputs/flutter-apk/*-arm64-v8a.apk
           retention-days: 30
 
@@ -144,10 +144,10 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/app/outputs/flutter-apk/datechat-*.apk
+          files: app/build/app/outputs/flutter-apk/arty-*.apk
           body: |
             Flutter ${{ steps.ver.outputs.flutter }} · 提交 `${{ steps.ver.outputs.sha }}`
-            包名 `com.datechat.datechat`，自签名（demo 分发用）。
+            包名 `com.arty.arty`，自签名（demo 分发用）。
             本产物为 arm64-v8a，适用于 HUAWEI Pura 70 等 64 位 ARM 安卓设备。
           draft: false
 
@@ -157,12 +157,12 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "- Flutter：${{ steps.ver.outputs.flutter }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- 提交：\`${{ steps.ver.outputs.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- 包名：\`com.datechat.datechat\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 包名：\`com.arty.arty\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- 后端：\`${{ inputs.api_base_url || 'https://hs2.rqez.cn' }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| ABI | 体积 | 适用 |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          for f in build/app/outputs/flutter-apk/datechat-*.apk; do
+          for f in build/app/outputs/flutter-apk/arty-*.apk; do
             n=$(basename "$f" .apk)
             abi=$(echo "$n" | awk -F'-' '{print $NF}')
             echo "| $abi | $(du -h "$f" | cut -f1) | HUAWEI Pura 70 / arm64 安卓设备 |" >> "$GITHUB_STEP_SUMMARY"

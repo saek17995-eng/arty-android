@@ -2,6 +2,11 @@
 # 运行镜像里不放编译工具链，既缩小攻击面，也让镜像从 ~1GB 降到 ~20MB。
 FROM golang:1.22-alpine AS builder
 
+# Allow deployments in regions where proxy.golang.org is slow or unreachable.
+# CI keeps the official default; China-hosted servers can pass goproxy.cn.
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
+
 WORKDIR /src
 # 先只拷依赖清单：代码没变时这一层命中缓存，不用每次重新下载模块。
 COPY go.mod go.sum ./

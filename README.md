@@ -1,4 +1,4 @@
-# DateChat · 陌生人语音视频社交 App
+# Arty · 陌生人语音视频社交 App
 
 Flutter + Go + MySQL + Redis，消息走腾讯 IM，音视频走腾讯 TRTC。
 
@@ -25,9 +25,9 @@ Flutter + Go + MySQL + Redis，消息走腾讯 IM，音视频走腾讯 TRTC。
 
 ## 在线仓库与 Android 安装包
 
-- 仓库：<https://github.com/saek17995-eng/datechat>
-- 安装包：Release 里的 `datechat-*.apk`（Android 7.0 / API 24 以上，arm64，19MB）
-  → <https://github.com/saek17995-eng/datechat/releases/tag/v0.1.0>
+- 仓库：<https://github.com/saek17995-eng/arty-android>
+- 安装包：Release 里的 `arty-*.apk`（Android 7.0 / API 24 以上，arm64）
+  → <https://github.com/saek17995-eng/arty-android/releases>
 
 安装包由 GitHub Actions 自动构建：`.github/workflows/android-apk.yml` 用 Flutter 官方模板
 现生成 `android/` 平台壳 → 补权限与签名 → `flutter build apk --release`，产物作为
@@ -38,7 +38,7 @@ gh workflow run android-apk.yml \
   -f api_base_url=https://your-server.com \
   -f app_name=知聊
 # 下载产物
-gh run download --name datechat-apk-<sha>
+gh run download --name arty-arm64-<sha>
 ```
 
 **装到手机上要连哪个后端**：默认打进包里的地址是 `https://api.datechat.example`（占位）。

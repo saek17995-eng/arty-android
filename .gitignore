@@ -48,3 +48,10 @@ logs/
 
 # 构建产物（APK / 下载包）
 dist/
+
+# HarmonyOS 本地工具链、依赖与构建缓存
+harmony/vendor/
+harmony/datechat/oh_modules/
+harmony/datechat/.hvigor/
+harmony/datechat/entry/build/
+harmony/datechat/local.properties

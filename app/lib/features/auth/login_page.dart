@@ -129,7 +129,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(height: 24),
-              Text('欢迎来到 DateChat', style: theme.textTheme.headlineSmall),
+              Text('欢迎来到 Arty', style: theme.textTheme.headlineSmall),
               const SizedBox(height: 8),
               Text(
                 '手机号验证码登录，未注册将自动创建账号',

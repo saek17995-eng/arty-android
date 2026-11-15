@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:datechat/core/realtime/realtime_event.dart';
+import 'package:arty/core/realtime/realtime_event.dart';
 
 void main() {
   group('RealtimeEvent', () {

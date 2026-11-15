@@ -11,8 +11,9 @@
 # 注意：bash 的 shell 状态在不同命令之间不保留，所以不能只 export 一次。
 export PATH="/Users/zhangchenyu/.local/bin:$PATH"
 export GOROOT="/opt/anaconda3/pkgs/go-1.27.3-cgo_hfa1a970_0/go"
-export GOPATH="/Users/zhangchenyu/WorkBuddy/2026-10-31-11-46-09/.local/gopath"
-export GOCACHE="/Users/zhangchenyu/WorkBuddy/2026-10-31-11-46-09/.local/gocache"
+DATECHAT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export GOPATH="$DATECHAT_ROOT/.local/gopath"
+export GOCACHE="$DATECHAT_ROOT/.local/gocache"
 export GOMODCACHE="$GOPATH/pkg/mod"
 export GOFLAGS="-mod=mod"
 export CGO_ENABLED=1

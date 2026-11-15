@@ -1,4 +1,4 @@
-# DateChat · Flutter 客户端
+# Arty · Flutter 客户端
 
 ## 目录约定
 

@@ -45,14 +45,14 @@ Future<void> bootstrap() async {
         serverConfigStoreProvider.overrideWithValue(serverConfig),
         notificationServiceProvider.overrideWithValue(notifications),
       ],
-      child: const DateChatApp(),
+      child: const ArtyApp(),
     ),
   );
 }
 
 /// 应用根组件。路由从 provider 取，这样登录态变化才能驱动 redirect。
-class DateChatApp extends ConsumerWidget {
-  const DateChatApp({super.key});
+class ArtyApp extends ConsumerWidget {
+  const ArtyApp({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -80,7 +80,7 @@ class DateChatApp extends ConsumerWidget {
       });
     });
     return MaterialApp.router(
-      title: 'DateChat',
+      title: 'Arty',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
