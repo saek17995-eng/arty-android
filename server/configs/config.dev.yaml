@@ -90,6 +90,12 @@ sms:
     sign_name: "${TENCENT_SMS_SIGN_NAME}"
     template_id: "${TENCENT_SMS_TEMPLATE_ID}"
     region: ap-guangzhou
+  yunpian:
+    api_key: "${YUNPIAN_SMS_API_KEY}"
+    template_id: "${YUNPIAN_SMS_TEMPLATE_ID}"
+    code_variable: "#code#"
+    minutes_variable: "#min#"
+    endpoint: "https://sms.yunpian.com/v2/sms/tpl_single_send.json"
 
 im:
   sdk_app_id: ${TENCENT_IM_SDK_APP_ID}

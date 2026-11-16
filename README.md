@@ -75,7 +75,7 @@ iOS 包需要 macOS + Xcode + Apple 开发者账号（签名与描述文件）�
 | 实名认证 | 姓名 2~20 汉字、身份证 GB11643 校验位与出生日期双重校验；`user_realname` 上 `id_card_hmac` 唯一，一号一人；未通过可重提，通过后禁止变更 |
 | 数据安全 | 手机号/姓名/身份证 AES-256-GCM 加密落库，另存 HMAC 供唯一索引；响应体只回脱敏值（138\*\*\*\*8000 / 110101\*\*\*\*\*\*\*\*1233） |
 | 腾讯 IM | 登录时异步 `account_import`（失败不阻塞登录），下发 UserSig；UserSig 用 HMAC-SHA256 + zlib 自实现，不引 SDK |
-| 通道可插拔 | 短信与实名都是 `Provider` 接口：`mock`（本地打日志/直接通过）与 `tencent`（腾讯云短信 / 人脸核身）由配置切换 |
+| 通道可插拔 | 短信与实名都是 `Provider` 接口：短信支持 `mock`、`tencent`、`yunpian`（云片），由配置切换 |
 
 ### 接口清单
 
@@ -538,7 +538,8 @@ cd server && APP_ENV=prod go run ./cmd/api -check-config   # 真实加载一遍�
 |---|---|---|
 | 应用 | `JWT_SECRET` `SECURITY_DATA_KEY` `SECURITY_HMAC_KEY` | 自生成：`bash scripts/secrets.sh gen 48` |
 | IM | `TENCENT_IM_SDK_APP_ID` `TENCENT_IM_SECRET_KEY` `TENCENT_IM_CALLBACK_TOKEN` | 控制台 → 即时通信 IM → 应用（密钥 / 回调配置） |
-| 短信 | `TENCENT_SMS_SECRET_ID` `TENCENT_SMS_SECRET_KEY` `TENCENT_SMS_SDK_APP_ID` `TENCENT_SMS_SIGN_NAME` `TENCENT_SMS_TEMPLATE_ID` | 控制台 → 短信 → 应用 / 签名模板 |
+| 短信（腾讯云） | `TENCENT_SMS_SECRET_ID` `TENCENT_SMS_SECRET_KEY` `TENCENT_SMS_SDK_APP_ID` `TENCENT_SMS_SIGN_NAME` `TENCENT_SMS_TEMPLATE_ID` | 控制台 → 短信 → 应用 / 签名模板 |
+| 短信（云片） | `YUNPIAN_SMS_API_KEY` `YUNPIAN_SMS_TEMPLATE_ID` | 云片控制台 → 账号设置 / 国内短信模板 |
 | 实名 | `TENCENT_FACEID_SECRET_ID` `TENCENT_FACEID_SECRET_KEY` `TENCENT_FACEID_RULE_ID` `REALNAME_REDIRECT_URL` | 控制台 → 人脸核身 → 业务流程 |
 | 对象存储 | `TENCENT_COS_SECRET_ID` `TENCENT_COS_SECRET_KEY` `TENCENT_COS_REGION` `TENCENT_COS_BUCKET` `TENCENT_COS_CDN_DOMAIN` | 控制台 → 对象存储 → 存储桶 |
 
@@ -595,6 +596,17 @@ cd server && APP_ENV=prod go run ./cmd/api -check-config   # 真实加载一遍�
 4. 审核通过后，填入 `TENCENT_SMS_SIGN_NAME`（签名内容，不含方括号）、`TENCENT_SMS_TEMPLATE_ID`、`TENCENT_SMS_SDK_APP_ID`。
 
 个人主体无法走通时：可将账号升级为企业认证，或用企业授权书申请「他用资质」。
+
+### 3.1 云片短信（可替代腾讯云）
+
+云片接入使用国内短信“指定模板单发”接口。先在云片控制台完成资质、签名和验证码模板审核，模板变量建议使用 `#code#` 与 `#min#`。然后在生产配置中切换通道：
+
+```yaml
+sms:
+  provider: yunpian
+```
+
+并在 `server/configs/.env` 填入 `YUNPIAN_SMS_API_KEY` 与 `YUNPIAN_SMS_TEMPLATE_ID`。云片 API Key 只在后端使用，禁止写入 APK 或提交到 Git。模板 ID 必须是云片控制台审核通过的数字 ID。
 
 ### 4. 人脸核身（实名）
 

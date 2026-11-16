@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"go.uber.org/zap"
@@ -29,11 +30,27 @@ func NewSMSProvider(cfg *config.Config, log *zap.Logger) (sms.Provider, error) {
 			return nil, fmt.Errorf("初始化腾讯云短信失败: %w", err)
 		}
 		return provider, nil
+	case "yunpian":
+		templateID, err := strconv.ParseInt(cfg.SMS.Yunpian.TemplateID, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("初始化云片短信失败: template_id 无效: %w", err)
+		}
+		provider, err := sms.NewYunpianProvider(sms.YunpianConfig{
+			APIKey:          cfg.SMS.Yunpian.APIKey,
+			TemplateID:      templateID,
+			CodeVariable:    cfg.SMS.Yunpian.CodeVariable,
+			MinutesVariable: cfg.SMS.Yunpian.MinutesVariable,
+			Endpoint:        cfg.SMS.Yunpian.Endpoint,
+		}, 5*time.Second)
+		if err != nil {
+			return nil, fmt.Errorf("初始化云片短信失败: %w", err)
+		}
+		return provider, nil
 	case "mock", "log", "":
 		log.Info("短信通道为本地日志模式，验证码不会真实下发")
 		return sms.NewLogProvider(log), nil
 	default:
-		return nil, fmt.Errorf("未知的短信通道: %q（可选 mock / tencent）", cfg.SMS.Provider)
+		return nil, fmt.Errorf("未知的短信通道: %q（可选 mock / tencent / yunpian）", cfg.SMS.Provider)
 	}
 }
 

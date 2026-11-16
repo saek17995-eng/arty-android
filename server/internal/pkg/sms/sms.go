@@ -12,7 +12,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -140,6 +144,88 @@ func (p *TencentProvider) Send(ctx context.Context, msg Message) (string, error)
 		return st.SerialNo, fmt.Errorf("sms: 发送失败 %s: %s", st.Code, st.Message)
 	}
 	return st.SerialNo, nil
+}
+
+// YunpianConfig 云片短信配置。
+type YunpianConfig struct {
+	APIKey          string
+	TemplateID      int64
+	CodeVariable    string
+	MinutesVariable string
+	Endpoint        string
+}
+
+// YunpianProvider 云片国内短信模板通道。
+type YunpianProvider struct {
+	cfg    YunpianConfig
+	client *http.Client
+}
+
+// NewYunpianProvider 创建云片短信通道。
+func NewYunpianProvider(cfg YunpianConfig, timeout time.Duration) (*YunpianProvider, error) {
+	if strings.TrimSpace(cfg.APIKey) == "" {
+		return nil, errors.New("sms: 云片短信缺少 api_key")
+	}
+	if cfg.TemplateID <= 0 {
+		return nil, errors.New("sms: 云片短信 template_id 必须为正数")
+	}
+	if strings.TrimSpace(cfg.CodeVariable) == "" {
+		cfg.CodeVariable = "#code#"
+	}
+	if strings.TrimSpace(cfg.MinutesVariable) == "" {
+		cfg.MinutesVariable = "#min#"
+	}
+	if strings.TrimSpace(cfg.Endpoint) == "" {
+		cfg.Endpoint = "https://sms.yunpian.com/v2/sms/tpl_single_send.json"
+	}
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	return &YunpianProvider{cfg: cfg, client: &http.Client{Timeout: timeout}}, nil
+}
+
+// Name 实现 Provider。
+func (p *YunpianProvider) Name() string { return "yunpian" }
+
+// Send 使用云片指定模板单发接口。模板变量默认是 #code# 和 #min#。
+func (p *YunpianProvider) Send(ctx context.Context, msg Message) (string, error) {
+	minutes := int(msg.TTL.Minutes())
+	if minutes <= 0 {
+		minutes = 5
+	}
+	form := url.Values{
+		"apikey":    {p.cfg.APIKey},
+		"mobile":    {msg.Phone},
+		"tpl_id":    {strconv.FormatInt(p.cfg.TemplateID, 10)},
+		"tpl_value": {url.QueryEscape(p.cfg.CodeVariable) + "=" + url.QueryEscape(msg.Code) + "&" + url.QueryEscape(p.cfg.MinutesVariable) + "=" + url.QueryEscape(strconv.Itoa(minutes))},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.cfg.Endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", fmt.Errorf("sms: 创建云片请求失败: %w", err)
+	}
+	req.Header.Set("Accept", "application/json;charset=utf-8")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded;charset=utf-8")
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("sms: 云片请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", fmt.Errorf("sms: 读取云片响应失败: %w", err)
+	}
+	var result struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		SID  int64  `json:"sid"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("sms: 解析云片响应失败（HTTP %d）: %w", resp.StatusCode, err)
+	}
+	if resp.StatusCode/100 != 2 || result.Code != 0 {
+		return strconv.FormatInt(result.SID, 10), fmt.Errorf("sms: 云片发送失败 %d: %s", result.Code, result.Msg)
+	}
+	return strconv.FormatInt(result.SID, 10), nil
 }
 
 // maskPhone 日志脱敏，避免日志成为手机号泄露源。

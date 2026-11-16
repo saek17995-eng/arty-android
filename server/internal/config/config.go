@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -397,7 +398,7 @@ type SecurityConfig struct {
 
 // SMSConfig 短信验证码策略。
 type SMSConfig struct {
-	Provider          string           `yaml:"provider"` // mock | tencent
+	Provider          string           `yaml:"provider"` // mock | tencent | yunpian
 	CodeLength        int              `yaml:"code_length"`
 	CodeTTL           Duration         `yaml:"code_ttl"`
 	ResendInterval    Duration         `yaml:"resend_interval"`
@@ -405,6 +406,7 @@ type SMSConfig struct {
 	MaxVerifyAttempts int              `yaml:"max_verify_attempts"`
 	ExposeCodeInDev   bool             `yaml:"expose_code_in_dev"` // 仅 dev 生效：响应体回带验证码，方便联调
 	Tencent           TencentSMSConfig `yaml:"tencent"`
+	Yunpian           YunpianSMSConfig `yaml:"yunpian"`
 }
 
 // TencentSMSConfig 腾讯云短信。
@@ -415,6 +417,15 @@ type TencentSMSConfig struct {
 	SignName   string `yaml:"sign_name"`
 	TemplateID string `yaml:"template_id"`
 	Region     string `yaml:"region"`
+}
+
+// YunpianSMSConfig 云片短信。
+type YunpianSMSConfig struct {
+	APIKey          string `yaml:"api_key"`
+	TemplateID      string `yaml:"template_id"`
+	CodeVariable    string `yaml:"code_variable"`
+	MinutesVariable string `yaml:"minutes_variable"`
+	Endpoint        string `yaml:"endpoint"`
 }
 
 // IMConfig 腾讯云 IM（即时通讯）配置。
@@ -646,6 +657,15 @@ func (c *Config) applyDefaults() {
 	if c.SMS.Tencent.Region == "" {
 		c.SMS.Tencent.Region = "ap-guangzhou"
 	}
+	if c.SMS.Yunpian.CodeVariable == "" {
+		c.SMS.Yunpian.CodeVariable = "#code#"
+	}
+	if c.SMS.Yunpian.MinutesVariable == "" {
+		c.SMS.Yunpian.MinutesVariable = "#min#"
+	}
+	if c.SMS.Yunpian.Endpoint == "" {
+		c.SMS.Yunpian.Endpoint = "https://sms.yunpian.com/v2/sms/tpl_single_send.json"
+	}
 	if c.IM.AdminUserID == "" {
 		c.IM.AdminUserID = "administrator"
 	}
@@ -769,6 +789,12 @@ func (c *Config) validate() error {
 	}
 	if c.SMS.Provider == "tencent" && c.SMS.Tencent.SecretID == "" {
 		return fmt.Errorf("短信通道为 tencent 时 sms.tencent.secret_id/secret_key 不能为空")
+	}
+	if c.SMS.Provider == "yunpian" {
+		id, err := strconv.ParseInt(c.SMS.Yunpian.TemplateID, 10, 64)
+		if c.SMS.Yunpian.APIKey == "" || err != nil || id <= 0 {
+			return fmt.Errorf("短信通道为 yunpian 时 sms.yunpian.api_key/template_id 不能为空")
+		}
 	}
 	if c.IM.MessageMaxChars < 1 || c.IM.MessageMaxChars > 2000 {
 		return fmt.Errorf("im.message_max_chars 需在 1~2000 之间，当前 %d", c.IM.MessageMaxChars)
