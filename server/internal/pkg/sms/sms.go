@@ -9,12 +9,16 @@ package sms
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha1"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -226,6 +230,95 @@ func (p *YunpianProvider) Send(ctx context.Context, msg Message) (string, error)
 		return strconv.FormatInt(result.SID, 10), fmt.Errorf("sms: 云片发送失败 %d: %s", result.Code, result.Msg)
 	}
 	return strconv.FormatInt(result.SID, 10), nil
+}
+
+// AliyunConfig 阿里云短信 RPC API 配置。
+type AliyunConfig struct {
+	AccessKeyID     string
+	AccessKeySecret string
+	SignName        string
+	TemplateCode    string
+	Endpoint        string
+}
+
+// AliyunProvider 阿里云 Dysmsapi 短信通道。
+type AliyunProvider struct {
+	cfg    AliyunConfig
+	client *http.Client
+}
+
+func NewAliyunProvider(cfg AliyunConfig, timeout time.Duration) (*AliyunProvider, error) {
+	if strings.TrimSpace(cfg.AccessKeyID) == "" || strings.TrimSpace(cfg.AccessKeySecret) == "" {
+		return nil, errors.New("sms: 阿里云短信缺少 access_key_id / access_key_secret")
+	}
+	if strings.TrimSpace(cfg.SignName) == "" || strings.TrimSpace(cfg.TemplateCode) == "" {
+		return nil, errors.New("sms: 阿里云短信缺少 sign_name / template_code")
+	}
+	if strings.TrimSpace(cfg.Endpoint) == "" {
+		cfg.Endpoint = "https://dysmsapi.aliyuncs.com/"
+	}
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	return &AliyunProvider{cfg: cfg, client: &http.Client{Timeout: timeout}}, nil
+}
+
+func (p *AliyunProvider) Name() string { return "aliyun" }
+
+// Send 调用阿里云 SendSms RPC API。模板变量为 {"code":"验证码"}；有效期文案由已审核模板固定。
+func (p *AliyunProvider) Send(ctx context.Context, msg Message) (string, error) {
+	params := map[string]string{
+		"AccessKeyId": p.cfg.AccessKeyID, "Action": "SendSms", "Format": "JSON",
+		"PhoneNumbers": msg.Phone, "SignName": p.cfg.SignName, "SignatureMethod": "HMAC-SHA1",
+		"SignatureNonce": uuidNonce(), "SignatureVersion": "1.0", "SignatureTimestamp": time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+		"TemplateCode": p.cfg.TemplateCode, "TemplateParam": `{"code":"` + msg.Code + `"}`, "Version": "2017-05-25",
+	}
+	canonical := canonicalQuery(params)
+	stringToSign := "GET&%2F&" + percentEncode(percentEncode(canonical))
+	h := hmac.New(sha1.New, []byte(p.cfg.AccessKeySecret+"&"))
+	_, _ = h.Write([]byte(stringToSign))
+	params["Signature"] = base64.StdEncoding.EncodeToString(h.Sum(nil))
+	query := canonicalQuery(params)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(p.cfg.Endpoint, "?")+"?"+query, nil)
+	if err != nil {
+		return "", fmt.Errorf("sms: 创建阿里云请求失败: %w", err)
+	}
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("sms: 阿里云请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", err
+	}
+	var result struct{ Code, Message, RequestID, BizID string }
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("sms: 解析阿里云响应失败（HTTP %d）: %w", resp.StatusCode, err)
+	}
+	if resp.StatusCode/100 != 2 || result.Code != "OK" {
+		return result.RequestID, fmt.Errorf("sms: 阿里云发送失败 %s: %s", result.Code, result.Message)
+	}
+	return result.BizID, nil
+}
+
+func uuidNonce() string { return fmt.Sprintf("%d-%d", time.Now().UnixNano(), time.Now().Unix()) }
+
+func percentEncode(s string) string {
+	return strings.NewReplacer("+", "%20", "*", "%2A", "%7E", "~").Replace(url.QueryEscape(s))
+}
+
+func canonicalQuery(params map[string]string) string {
+	keys := make([]string, 0, len(params))
+	for k := range params {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, percentEncode(k)+"="+percentEncode(params[k]))
+	}
+	return strings.Join(parts, "&")
 }
 
 // maskPhone 日志脱敏，避免日志成为手机号泄露源。

@@ -46,11 +46,21 @@ func NewSMSProvider(cfg *config.Config, log *zap.Logger) (sms.Provider, error) {
 			return nil, fmt.Errorf("初始化云片短信失败: %w", err)
 		}
 		return provider, nil
+	case "aliyun":
+		provider, err := sms.NewAliyunProvider(sms.AliyunConfig{
+			AccessKeyID: cfg.SMS.Aliyun.AccessKeyID, AccessKeySecret: cfg.SMS.Aliyun.AccessKeySecret,
+			SignName: cfg.SMS.Aliyun.SignName, TemplateCode: cfg.SMS.Aliyun.TemplateCode,
+			Endpoint: cfg.SMS.Aliyun.Endpoint,
+		}, 5*time.Second)
+		if err != nil {
+			return nil, fmt.Errorf("初始化阿里云短信失败: %w", err)
+		}
+		return provider, nil
 	case "mock", "log", "":
 		log.Info("短信通道为本地日志模式，验证码不会真实下发")
 		return sms.NewLogProvider(log), nil
 	default:
-		return nil, fmt.Errorf("未知的短信通道: %q（可选 mock / tencent / yunpian）", cfg.SMS.Provider)
+		return nil, fmt.Errorf("未知的短信通道: %q（可选 mock / tencent / yunpian / aliyun）", cfg.SMS.Provider)
 	}
 }
 

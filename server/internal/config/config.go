@@ -398,7 +398,7 @@ type SecurityConfig struct {
 
 // SMSConfig 短信验证码策略。
 type SMSConfig struct {
-	Provider          string           `yaml:"provider"` // mock | tencent | yunpian
+	Provider          string           `yaml:"provider"` // mock | tencent | yunpian | aliyun
 	CodeLength        int              `yaml:"code_length"`
 	CodeTTL           Duration         `yaml:"code_ttl"`
 	ResendInterval    Duration         `yaml:"resend_interval"`
@@ -407,6 +407,7 @@ type SMSConfig struct {
 	ExposeCodeInDev   bool             `yaml:"expose_code_in_dev"` // 仅 dev 生效：响应体回带验证码，方便联调
 	Tencent           TencentSMSConfig `yaml:"tencent"`
 	Yunpian           YunpianSMSConfig `yaml:"yunpian"`
+	Aliyun            AliyunSMSConfig  `yaml:"aliyun"`
 }
 
 // TencentSMSConfig 腾讯云短信。
@@ -425,6 +426,15 @@ type YunpianSMSConfig struct {
 	TemplateID      string `yaml:"template_id"`
 	CodeVariable    string `yaml:"code_variable"`
 	MinutesVariable string `yaml:"minutes_variable"`
+	Endpoint        string `yaml:"endpoint"`
+}
+
+// AliyunSMSConfig 阿里云短信（Dysmsapi RPC API）。
+type AliyunSMSConfig struct {
+	AccessKeyID     string `yaml:"access_key_id"`
+	AccessKeySecret string `yaml:"access_key_secret"`
+	SignName        string `yaml:"sign_name"`
+	TemplateCode    string `yaml:"template_code"`
 	Endpoint        string `yaml:"endpoint"`
 }
 
@@ -794,6 +804,11 @@ func (c *Config) validate() error {
 		id, err := strconv.ParseInt(c.SMS.Yunpian.TemplateID, 10, 64)
 		if c.SMS.Yunpian.APIKey == "" || err != nil || id <= 0 {
 			return fmt.Errorf("短信通道为 yunpian 时 sms.yunpian.api_key/template_id 不能为空")
+		}
+	}
+	if c.SMS.Provider == "aliyun" {
+		if c.SMS.Aliyun.AccessKeyID == "" || c.SMS.Aliyun.AccessKeySecret == "" || c.SMS.Aliyun.SignName == "" || c.SMS.Aliyun.TemplateCode == "" {
+			return fmt.Errorf("短信通道为 aliyun 时 access_key_id/access_key_secret/sign_name/template_code 不能为空")
 		}
 	}
 	if c.IM.MessageMaxChars < 1 || c.IM.MessageMaxChars > 2000 {
