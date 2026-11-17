@@ -76,7 +76,7 @@ security:
   hmac_key: "${SECURITY_HMAC_KEY}"
 
 sms:
-  provider: tencent
+  provider: aliyun
   code_length: 6
   code_ttl: 5m
   resend_interval: 60s
