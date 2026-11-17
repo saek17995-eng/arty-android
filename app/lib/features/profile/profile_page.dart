@@ -3,8 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../auth/auth_controller.dart';
-import '../auth/realname_sheet.dart';
-import '../auth/data/auth_models.dart';
 import '../nearby/nearby_page.dart';
 import '../../core/di/providers.dart';
 import '../../shared/widgets/server_settings_sheet.dart';
@@ -54,32 +52,6 @@ class ProfilePage extends ConsumerWidget {
                   enabled: me != null,
                   onTap:
                       me == null ? null : () => context.push('/user/${me.uid}'),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.badge_outlined),
-                  title: const Text('实名认证'),
-                  subtitle: Text(me?.realnameText ?? '未认证'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () async {
-                    final status = await _resolveStatus(context, ref);
-                    if (status == null || !context.mounted) return;
-                    if (status.passed) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('你已完成实名认证')),
-                      );
-                      return;
-                    }
-                    await showRealnameSheet(context);
-                  },
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.account_balance_wallet_outlined),
-                  title: const Text('我的钱包'),
-                  subtitle: const Text('金币余额、充值与流水'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => context.push('/wallet'),
                 ),
                 const Divider(height: 1),
                 ListTile(
@@ -135,21 +107,6 @@ class ProfilePage extends ConsumerWidget {
         ],
       ),
     );
-  }
-
-  /// 打开表单前先查一次状态，避免已认证用户重复提交（服务端也会拦，但少一次无效请求）。
-  Future<RealnameStatus?> _resolveStatus(
-      BuildContext context, WidgetRef ref) async {
-    try {
-      return await ref.read(authApiProvider).realnameStatus();
-    } catch (error) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('查询实名状态失败：$error')),
-        );
-      }
-      return null;
-    }
   }
 
   Future<void> _confirmLogout(BuildContext context, WidgetRef ref) async {

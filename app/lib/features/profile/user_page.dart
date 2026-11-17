@@ -93,10 +93,6 @@ class UserPage extends ConsumerWidget {
                     _InfoRow(
                         label: '城市',
                         value: user.cityName.isEmpty ? '未填写' : user.cityName),
-                    _InfoRow(
-                      label: '实名认证',
-                      value: user.isRealnameVerified ? '已认证' : '未认证',
-                    ),
                     _InfoRow(label: '语音通话', value: '${user.priceAudio} 金币/分钟'),
                     _InfoRow(label: '视频通话', value: '${user.priceVideo} 金币/分钟'),
                   ],

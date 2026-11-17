@@ -15,7 +15,6 @@ import '../../features/profile/edit_profile_page.dart';
 import '../../features/profile/profile_page.dart';
 import '../../features/profile/user_page.dart';
 import '../../features/shell/main_shell.dart';
-import '../../features/wallet/wallet_page.dart';
 
 /// 全局路由。
 ///
@@ -74,11 +73,6 @@ final routerProvider = Provider<GoRouter>((ref) {
           final uid = int.tryParse(state.pathParameters['peerUid'] ?? '') ?? 0;
           return ChatPage(peerUid: uid);
         },
-      ),
-      // P5：钱包与充值
-      GoRoute(
-        path: '/wallet',
-        builder: (context, state) => const WalletPage(),
       ),
       // P7：谁看过我
       GoRoute(
