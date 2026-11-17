@@ -27,6 +27,8 @@ on:
         description: 'TURN 密码'
         required: false
   push:
+    tags:
+      - 'v*'
     paths:
       - 'app/**'
       - 'scripts/android/**'
