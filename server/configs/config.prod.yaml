@@ -132,8 +132,9 @@ upload:
     sign_expire: 30m
 
 realname:
-  provider: tencent
-  enabled: true
+  # 当前服务器未配置腾讯云人脸核身凭据；短信登录不依赖实名服务。
+  provider: mock
+  enabled: false
   tencent:
     secret_id: "${TENCENT_FACEID_SECRET_ID}"
     secret_key: "${TENCENT_FACEID_SECRET_KEY}"
