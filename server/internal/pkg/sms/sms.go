@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/datechat/server/internal/pkg/tc3"
@@ -248,6 +249,13 @@ type AliyunProvider struct {
 }
 
 func NewAliyunProvider(cfg AliyunConfig, timeout time.Duration) (*AliyunProvider, error) {
+	// 环境文件由人工维护时，首尾空格或 Windows 回车很容易被一并读入。
+	// 这些字符会改变签名，但肉眼通常不易发现，因此在进入签名流程前统一清理。
+	cfg.AccessKeyID = strings.TrimSpace(cfg.AccessKeyID)
+	cfg.AccessKeySecret = strings.TrimSpace(cfg.AccessKeySecret)
+	cfg.SignName = strings.TrimSpace(cfg.SignName)
+	cfg.TemplateCode = strings.TrimSpace(cfg.TemplateCode)
+	cfg.Endpoint = strings.TrimSpace(cfg.Endpoint)
 	if strings.TrimSpace(cfg.AccessKeyID) == "" || strings.TrimSpace(cfg.AccessKeySecret) == "" {
 		return nil, errors.New("sms: 阿里云短信缺少 access_key_id / access_key_secret")
 	}
@@ -302,10 +310,25 @@ func (p *AliyunProvider) Send(ctx context.Context, msg Message) (string, error) 
 	return result.BizID, nil
 }
 
-func uuidNonce() string { return fmt.Sprintf("%d-%d", time.Now().UnixNano(), time.Now().Unix()) }
+func uuidNonce() string { return uuid.NewString() }
 
 func percentEncode(s string) string {
-	return strings.NewReplacer("+", "%20", "*", "%2A", "%7E", "~").Replace(url.QueryEscape(s))
+	// 阿里云 RPC 签名要求 RFC3986：空格编码为 %20，~ 保留，十六进制大写。
+	// url.QueryEscape 使用表单编码（空格为 +），再替换的方式容易遗漏边界字符。
+	const hex = "0123456789ABCDEF"
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+			(c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~' {
+			b.WriteByte(c)
+			continue
+		}
+		b.WriteByte('%')
+		b.WriteByte(hex[c>>4])
+		b.WriteByte(hex[c&0x0f])
+	}
+	return b.String()
 }
 
 func canonicalQuery(params map[string]string) string {
