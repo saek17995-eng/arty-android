@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../auth/auth_controller.dart';
+import '../auth/data/auth_models.dart';
 import '../nearby/nearby_page.dart';
 import '../../core/di/providers.dart';
 import '../../shared/widgets/server_settings_sheet.dart';
