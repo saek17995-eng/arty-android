@@ -270,7 +270,7 @@ func (p *AliyunProvider) Send(ctx context.Context, msg Message) (string, error) 
 	params := map[string]string{
 		"AccessKeyId": p.cfg.AccessKeyID, "Action": "SendSms", "Format": "JSON",
 		"PhoneNumbers": msg.Phone, "SignName": p.cfg.SignName, "SignatureMethod": "HMAC-SHA1",
-		"SignatureNonce": uuidNonce(), "SignatureVersion": "1.0", "SignatureTimestamp": time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+		"SignatureNonce": uuidNonce(), "SignatureVersion": "1.0", "Timestamp": time.Now().UTC().Format("2006-01-02T15:04:05Z"),
 		"TemplateCode": p.cfg.TemplateCode, "TemplateParam": `{"code":"` + msg.Code + `"}`, "Version": "2017-05-25",
 	}
 	canonical := canonicalQuery(params)
